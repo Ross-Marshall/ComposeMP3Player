@@ -1,3 +1,4 @@
+
 @file:Suppress("DEPRECATION")
 
 package com.example.composemp3player
@@ -1352,7 +1353,86 @@ private fun PlaylistTab(
     }
 }
 
+@Composable
+private fun PlaylistHeader(playlist: PlaylistItem, songs: List<AudioFile>) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        var playlistId = playlist.id
+        val context = LocalContext.current
+        val coverUri = remember(playlist.id) { loadPlaylistCoverUri(context, playlistId) } // optional
 
+        if (!coverUri.isNullOrEmpty()) {
+            // User-selected cover
+            val painter = coil.compose.rememberAsyncImagePainter(coverUri)
+            androidx.compose.foundation.Image(
+                painter = painter,
+                contentDescription = null,
+                modifier = Modifier
+                    .fillMaxWidth(0.50f)
+                    .aspectRatio(1f)
+                    .clip(MaterialTheme.shapes.medium)
+            )
+        } else {
+            // Collage fallback from first 4 distinct albumIds
+            val ids = songs.mapNotNull { it.albumId }.distinct().take(4)
+            if (ids.isNotEmpty()) {
+                AlbumArtCollage(
+                    albumIds = ids,
+                    size = 200.dp
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.50f)
+                        .aspectRatio(1f)
+                        .clip(MaterialTheme.shapes.medium)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        val totalMs = remember(songs) { totalDurationMs(songs) }
+        Text("${songs.size} ${if (songs.size == 1) "song" else "songs"} — ${formatHms(totalMs)}",
+            style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable
+fun PlaylistSongsScreen(
+    playlist: PlaylistItem,
+    songs: List<AudioFile>,
+    onBack: () -> Unit,
+    onPlaySong: (AudioFile) -> Unit,
+    onPlaylistChanged: () -> Unit = {},
+    contentPadding: PaddingValues,
+) {
+    Column(Modifier.fillMaxSize().padding(contentPadding)) {
+       /* Row(
+            modifier = Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, "Back") }
+            //Text(playlist.name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 4.dp))
+        }*/
+
+        // 🔽 Big cover at the top
+        PlaylistHeader(playlist = playlist, songs = songs)
+
+        LazyColumn(Modifier.fillMaxSize()) {
+            items(songs, key = { it.id }) { s ->
+                ListItem(
+                    leadingContent = { AlbumArtThumb(albumId = s.albumId, size = 52.dp) },
+                    headlineContent = { Text(s.title, maxLines = 1) },
+                    supportingContent = { Text(s.artist ?: "Unknown Artist", maxLines = 1) },
+                    modifier = Modifier.fillMaxWidth().clickable { onPlaySong(s) }
+                )
+                Divider()
+            }
+        }
+    }
+}
+
+/*
 @Composable
 fun PlaylistSongsScreen(
     playlist: PlaylistItem,
@@ -1404,7 +1484,9 @@ fun PlaylistSongsScreen(
         item { Spacer(Modifier.height(16.dp)) }
     }
 }
+*/
 
+/*
 @Composable
 private fun PlaylistSummaryRow(playlist: PlaylistItem, songs: List<AudioFile>) {
     val durationStr = formatHms(totalDurationMs(songs))
@@ -1414,7 +1496,7 @@ private fun PlaylistSummaryRow(playlist: PlaylistItem, songs: List<AudioFile>) {
         modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
     )
 }
-
+*/
 
 @Composable private fun GenresTab(genres: List<GenreItem>) {
     LazyColumn(Modifier.fillMaxSize()) {
@@ -1425,6 +1507,7 @@ private fun PlaylistSummaryRow(playlist: PlaylistItem, songs: List<AudioFile>) {
     }
 }
 
+/*
 @Composable
 private fun AddSongsToPlaylistDialog(
     allSongs: List<AudioFile>,
@@ -1504,6 +1587,7 @@ private fun AddSongsToPlaylistDialog(
         }
     )
 }
+*/
 
 /* ---------- MediaStore loaders (for later) ---------- */
 
