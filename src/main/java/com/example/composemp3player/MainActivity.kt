@@ -408,7 +408,7 @@ fun MusicPlayerApp() {
                 PlaylistSongsScreen(
                     playlist = pl,
                     songs = playlistSongs,
-                    allSongs = songs,
+                    //allSongs = songs,
                     onBack = { viewingPlaylist = null },
                     onPlaySong = { song ->
                         val idx = playlistSongs.indexOfFirst { it.id == song.id }
@@ -1277,6 +1277,16 @@ private fun PlaylistTab(
                 LazyColumn(Modifier.fillMaxSize()) {
                     items(results, key = { it.first.id }) { (pl, matchCount) ->
                         val songsInPl = cache[pl.id] ?: emptyList()
+
+                        val durationMs by produceState(initialValue = 0L, pl.id, context) {
+                            value = runCatching {
+                                val songs = loadPlaylistSongs(context, pl.id)     // you already have this
+                                totalDurationMs(songs)                             // uses itDurationMs() internally
+                            }.getOrDefault(0L)
+                        }
+
+                        val durationStr = formatHms(durationMs)
+
                         ListItem(
                             leadingContent = {
                                 PlaylistCoverThumb(
@@ -1287,11 +1297,15 @@ private fun PlaylistTab(
                             },
                             headlineContent = { Text(pl.name, maxLines = 1) },
                             supportingContent = {
-                                Text(
-                                    "$matchCount matching song${if (matchCount == 1) "" else "s"}",
-                                    maxLines = 1
-                                )
+                                // "XX songs — h:mm:ss"
+                                Text("${pl.trackCount} songs — $durationStr")
                             },
+                            //supportingContent = {
+                            //    Text(
+                            //        "$matchCount matching song${if (matchCount == 1) "" else "s"}",
+                            //        maxLines = 1
+                            //    )
+                            //},
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { onOpenPlaylist(pl) }
@@ -1304,6 +1318,49 @@ private fun PlaylistTab(
     }
 }
 
+/*
+@Composable
+private fun PlaylistTab(
+    playlists: List<PlaylistItem>,
+    onOpenPlaylist: (PlaylistItem) -> Unit
+) {
+    val context = LocalContext.current
+
+    LazyColumn(Modifier.fillMaxSize()) {
+        items(playlists, key = { it.id }) { pl ->
+            // Load songs and compute total duration in the background
+            val durationMs by produceState(initialValue = 0L, pl.id, context) {
+                value = runCatching {
+                    val songs = loadPlaylistSongs(context, pl.id)     // you already have this
+                    totalDurationMs(songs)                             // uses itDurationMs() internally
+                }.getOrDefault(0L)
+            }
+
+            val durationStr = formatHms(durationMs)
+
+            ListItem(
+                headlineContent = {
+                    Text(
+                        text = pl.name,
+                        maxLines = 1
+                    )
+                },
+                supportingContent = {
+                    // "XX songs — h:mm:ss"
+                    Text("${pl.trackCount} songs — $durationStr")
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenPlaylist(pl) }
+            )
+            Divider()
+        }
+    }
+}
+*/
+
+
+/*
 @Composable
 private fun PlaylistSongsScreen(
     playlist: PlaylistItem,
@@ -1538,6 +1595,71 @@ private fun PlaylistSongsScreen(
         )
     }
 }
+*/
+ */
+
+@Composable
+fun PlaylistSongsScreen(
+    playlist: PlaylistItem,
+    songs: List<AudioFile>,
+    // Kept for API compatibility with your existing calls (top app bar handles back)
+    onBack: () -> Unit = {},
+    onPlaySong: (AudioFile) -> Unit,
+    // Optional: if you later wire editing (add/remove/reorder) you can trigger a reload
+    onPlaylistChanged: () -> Unit = {},
+    contentPadding: PaddingValues = PaddingValues(0.dp)
+) {
+    val context = LocalContext.current
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = contentPadding
+    ) {
+        // Header
+        item {
+            Spacer(Modifier.height(8.dp))
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Text(playlist.name, style = MaterialTheme.typography.titleLarge)
+                PlaylistSummaryRow(playlist, songs) // shows "XX songs — h:mm:ss"
+            }
+            Divider()
+        }
+
+        // Songs in the playlist
+        items(songs, key = { it.id }) { song ->
+            ListItem(
+                leadingContent = {
+                    // Small album art on the left (uses your helper)
+                    AlbumArtThumb(albumId = song.albumId, size = 52.dp)
+                },
+                headlineContent = { Text(song.title, maxLines = 1) },
+                supportingContent = { Text(song.artist ?: "Unknown Artist", maxLines = 1) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onPlaySong(song) }
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+            Divider()
+        }
+
+        item { Spacer(Modifier.height(16.dp)) }
+    }
+}
+
+@Composable
+private fun PlaylistSummaryRow(playlist: PlaylistItem, songs: List<AudioFile>) {
+    val durationStr = formatHms(totalDurationMs(songs))
+    Text(
+        text = "${songs.size} songs — $durationStr",
+        style = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
+    )
+}
+
 
 @Composable private fun GenresTab(genres: List<GenreItem>) {
     LazyColumn(Modifier.fillMaxSize()) {
@@ -2065,19 +2187,7 @@ private fun DraggableScrollbar(
         }
     }
 }
-/*
-private fun songToMediaItem(song: AudioFile): MediaItem {
-    val artUri = song.albumId?.let {
-        ContentUris.withAppendedId(Uri.parse("content://media/external/audio/albumart"), it)
-    }
-    val md = MediaMetadata.Builder()
-        .setTitle(song.title)
-        .setArtist(song.artist ?: "Unknown Artist")
-        .setArtworkUri(artUri)
-        .build()
-    return MediaItem.Builder().setUri(song.uri).setMediaMetadata(md).build()
-}
-*/
+
 
 @Composable
 private fun LazyColumnWithScrollbar(
