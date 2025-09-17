@@ -1189,10 +1189,13 @@ private fun PlaylistTab(
     var query by rememberSaveable { mutableStateOf("") }
     val q = remember(query) { query.trim().lowercase() }
 
-    // Cache playlistId -> songs (used for search + collage fallback)
+    // Cache playlistId -> songs (used for search + collage)
     val cache = remember { mutableStateMapOf<Long, List<AudioFile>>() }
 
-    // If searching, prefetch all so results can be computed
+    // Cache playlistId -> total duration (ms)
+    val durationCache = remember { mutableStateMapOf<Long, Long>() }
+
+    // If searching, prefetch all so results & durations can be computed
     LaunchedEffect(q, playlists) {
         if (q.isNotEmpty()) {
             playlists.forEach { pl ->
@@ -1242,12 +1245,31 @@ private fun PlaylistTab(
             // Default list
             LazyColumn(Modifier.fillMaxSize()) {
                 items(playlists, key = { it.id }) { pl ->
-                    // Lazy fill cache for this row (for collage fallback & future totals)
+                    // Ensure songs are cached for collage & duration
                     LaunchedEffect(pl.id) {
                         if (pl.id !in cache) {
                             cache[pl.id] = runCatching { loadPlaylistSongs(context, pl.id) }.getOrDefault(emptyList())
                         }
                     }
+
+                    // Compute duration if not cached
+                    val durationMs by produceState(
+                        key1 = pl.id,
+                        initialValue = durationCache[pl.id] ?: -1L
+                    ) {
+                        if (value != -1L) return@produceState // already cached
+                        val songsInPl = cache[pl.id] ?: runCatching {
+                            loadPlaylistSongs(context, pl.id)
+                        }.getOrDefault(emptyList())
+                        val dur = with(kotlinx.coroutines.Dispatchers.IO) {
+                            //totalDurationMs(context, songsInPl)
+                            totalDurationMs(songsInPl)
+                        }
+                        durationCache[pl.id] = dur
+                        value = dur
+                    }
+
+                    val durationStr = if (durationMs >= 0) formatHms(durationMs) else "0:00"
                     val songsInPl = cache[pl.id] ?: emptyList()
 
                     ListItem(
@@ -1259,7 +1281,9 @@ private fun PlaylistTab(
                             )
                         },
                         headlineContent = { Text(pl.name, maxLines = 1) },
-                        supportingContent = { Text("${pl.trackCount} tracks", maxLines = 1) },
+                        supportingContent = {
+                            Text("${pl.trackCount} songs — $durationStr", maxLines = 1)
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onOpenPlaylist(pl) }
@@ -1270,22 +1294,39 @@ private fun PlaylistTab(
         } else {
             // Search results (playlists that contain matching songs)
             if (results.isEmpty()) {
-                Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier.fillMaxSize().padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
                     Text("No playlists contain “$query”.")
                 }
             } else {
                 LazyColumn(Modifier.fillMaxSize()) {
-                    items(results, key = { it.first.id }) { (pl, matchCount) ->
-                        val songsInPl = cache[pl.id] ?: emptyList()
-
-                        val durationMs by produceState(initialValue = 0L, pl.id, context) {
-                            value = runCatching {
-                                val songs = loadPlaylistSongs(context, pl.id)     // you already have this
-                                totalDurationMs(songs)                             // uses itDurationMs() internally
-                            }.getOrDefault(0L)
+                    items(results, key = { it.first.id }) { (pl, _matchCount) ->
+                        // Ensure songs are cached
+                        LaunchedEffect(pl.id) {
+                            if (pl.id !in cache) {
+                                cache[pl.id] = runCatching { loadPlaylistSongs(context, pl.id) }.getOrDefault(emptyList())
+                            }
                         }
-
-                        val durationStr = formatHms(durationMs)
+                        // Duration (from cache or compute)
+                        val durationMs by produceState(
+                            key1 = pl.id,
+                            initialValue = durationCache[pl.id] ?: -1L
+                        ) {
+                            if (value != -1L) return@produceState
+                            val songsInPl = cache[pl.id] ?: runCatching {
+                                loadPlaylistSongs(context, pl.id)
+                            }.getOrDefault(emptyList())
+                            val dur = with(kotlinx.coroutines.Dispatchers.IO) {
+                                //totalDurationMs(context, songsInPl)
+                                totalDurationMs(songsInPl)
+                            }
+                            durationCache[pl.id] = dur
+                            value = dur
+                        }
+                        val durationStr = if (durationMs >= 0) formatHms(durationMs) else "0:00"
+                        val songsInPl = cache[pl.id] ?: emptyList()
 
                         ListItem(
                             leadingContent = {
@@ -1297,15 +1338,8 @@ private fun PlaylistTab(
                             },
                             headlineContent = { Text(pl.name, maxLines = 1) },
                             supportingContent = {
-                                // "XX songs — h:mm:ss"
-                                Text("${pl.trackCount} songs — $durationStr")
+                                Text("${pl.trackCount} songs — $durationStr", maxLines = 1)
                             },
-                            //supportingContent = {
-                            //    Text(
-                            //        "$matchCount matching song${if (matchCount == 1) "" else "s"}",
-                            //        maxLines = 1
-                            //    )
-                            //},
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { onOpenPlaylist(pl) }
@@ -1318,285 +1352,6 @@ private fun PlaylistTab(
     }
 }
 
-/*
-@Composable
-private fun PlaylistTab(
-    playlists: List<PlaylistItem>,
-    onOpenPlaylist: (PlaylistItem) -> Unit
-) {
-    val context = LocalContext.current
-
-    LazyColumn(Modifier.fillMaxSize()) {
-        items(playlists, key = { it.id }) { pl ->
-            // Load songs and compute total duration in the background
-            val durationMs by produceState(initialValue = 0L, pl.id, context) {
-                value = runCatching {
-                    val songs = loadPlaylistSongs(context, pl.id)     // you already have this
-                    totalDurationMs(songs)                             // uses itDurationMs() internally
-                }.getOrDefault(0L)
-            }
-
-            val durationStr = formatHms(durationMs)
-
-            ListItem(
-                headlineContent = {
-                    Text(
-                        text = pl.name,
-                        maxLines = 1
-                    )
-                },
-                supportingContent = {
-                    // "XX songs — h:mm:ss"
-                    Text("${pl.trackCount} songs — $durationStr")
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenPlaylist(pl) }
-            )
-            Divider()
-        }
-    }
-}
-*/
-
-
-/*
-@Composable
-private fun PlaylistSongsScreen(
-    playlist: PlaylistItem,
-    songs: List<AudioFile>,
-    allSongs: List<AudioFile>,
-    onBack: () -> Unit,
-    onPlaySong: (AudioFile) -> Unit,
-    onPlaylistChanged: () -> Unit,
-    contentPadding: PaddingValues = PaddingValues(0.dp)
-) {
-    val context = LocalContext.current
-
-    // --- Edit mode + selection ---
-    var editMode by rememberSaveable { mutableStateOf(false) }
-    val selected = remember { mutableStateListOf<Long>() } // audioIds
-    fun clearSelection() = selected.clear()
-
-    // --- Cover pick + M3U export launchers ---
-    val pickCoverLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        uri?.let {
-            context.contentResolver.takePersistableUriPermission(
-                it, Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
-            savePlaylistCoverUri(context, playlist.id, it.toString())
-            onPlaylistChanged()
-        }
-    }
-
-    val createM3uLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("audio/x-mpegurl")
-    ) { dest: Uri? ->
-        if (dest != null) {
-            runCatching { exportM3u(context, songs, dest) }
-                .onSuccess { /* toast/snackbar if you like */ }
-                .onFailure { it.printStackTrace() }
-        }
-    }
-
-    // --- Add songs dialog state ---
-    var showAddDialog by rememberSaveable { mutableStateOf(false) }
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(contentPadding)
-    ) {
-        // Header collage/custom cover
-        val headerAlbumIds = remember(songs) {
-            songs.asSequence().mapNotNull { it.albumId }.distinct().take(4).toList()
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp, bottom = 4.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            // prefer custom cover, else collage
-            val customCover = loadPlaylistCoverUri(context, playlist.id)
-            if (!customCover.isNullOrBlank()) {
-                androidx.compose.foundation.Image(
-                    painter = coil.compose.rememberAsyncImagePainter(Uri.parse(customCover)),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(160.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                )
-            } else {
-                AlbumArtCollage(albumIds = headerAlbumIds, size = 160.dp)
-            }
-        }
-
-        // Top action row
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                playlist.name,
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.weight(1f)
-            )
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Set Cover
-                IconButton(onClick = { pickCoverLauncher.launch(arrayOf("image/*")) }) {
-                    Icon(Icons.Default.Image, contentDescription = "Set Cover")
-                }
-                // Export M3U
-                IconButton(onClick = {
-                    val safeName = (playlist.name.ifBlank { "playlist" })
-                        .replace(Regex("""[\\/:"*?<>|]+"""), "_")
-                    createM3uLauncher.launch("$safeName.m3u")
-                }) {
-                    Icon(Icons.Default.FileDownload, contentDescription = "Export M3U")
-                }
-                // Toggle Edit
-                FilterChip(
-                    selected = editMode,
-                    onClick = {
-                        editMode = !editMode
-                        if (!editMode) clearSelection()
-                    },
-                    label = { Text(if (editMode) "Done" else "Edit") }
-                )
-            }
-        }
-
-        // In edit mode: toolbar (Add / Remove)
-        if (editMode) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilledTonalIconButton(onClick = { showAddDialog = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "Add songs")
-                }
-                val canRemove = selected.isNotEmpty()
-                FilledTonalIconButton(
-                    enabled = canRemove,
-                    onClick = {
-                        // Remove selected songs by AUDIO_ID
-                        selected.toList().forEach { audioId ->
-                            removeFromPlaylistByAudioId(context, playlist.id, audioId)
-                        }
-                        clearSelection()
-                        onPlaylistChanged()
-                    }
-                ) {
-                    Icon(Icons.Default.Delete, contentDescription = "Remove selected")
-                }
-                if (selected.isNotEmpty()) {
-                    Text("${selected.size} selected", style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-            Spacer(Modifier.height(4.dp))
-        }
-
-        // List of songs
-        LazyColumn(Modifier.fillMaxSize()) {
-            items(songs, key = { it.id }) { song ->
-                val checked = song.id in selected
-                ListItem(
-                    leadingContent = {
-                        if (editMode) {
-                            Checkbox(
-                                checked = checked,
-                                onCheckedChange = { on ->
-                                    if (on) selected.add(song.id) else selected.remove(song.id)
-                                }
-                            )
-                        } else {
-                            AlbumArtThumb(albumId = song.albumId, size = 52.dp)
-                        }
-                    },
-                    headlineContent = { Text(song.title, maxLines = 1) },
-                    supportingContent = {
-                        Text(song.artist ?: "Unknown Artist", maxLines = 1)
-                    },
-                    trailingContent = {
-                        if (editMode) {
-                            Row {
-                                IconButton(
-                                    onClick = {
-                                        // Move Up
-                                        val idx = songs.indexOfFirst { it.id == song.id }
-                                        if (idx > 0) {
-                                            val newOrder = songs.map { it.id }.toMutableList().apply {
-                                                val tmp = this[idx - 1]
-                                                this[idx - 1] = this[idx]
-                                                this[idx] = tmp
-                                            }
-                                            reorderPlaylist(context, playlist.id, newOrder)
-                                            onPlaylistChanged()
-                                        }
-                                    }
-                                ) { Icon(Icons.Default.ArrowUpward, contentDescription = "Up") }
-
-                                IconButton(
-                                    onClick = {
-                                        // Move Down
-                                        val idx = songs.indexOfFirst { it.id == song.id }
-                                        if (idx >= 0 && idx < songs.lastIndex) {
-                                            val newOrder = songs.map { it.id }.toMutableList().apply {
-                                                val tmp = this[idx + 1]
-                                                this[idx + 1] = this[idx]
-                                                this[idx] = tmp
-                                            }
-                                            reorderPlaylist(context, playlist.id, newOrder)
-                                            onPlaylistChanged()
-                                        }
-                                    }
-                                ) { Icon(Icons.Default.ArrowDownward, contentDescription = "Down") }
-                            }
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            if (editMode) {
-                                if (checked) selected.remove(song.id) else selected.add(song.id)
-                            } else {
-                                onPlaySong(song)
-                            }
-                        }
-                )
-                Divider()
-            }
-        }
-    }
-
-    // --- Add Songs Dialog ---
-    if (showAddDialog) {
-        AddSongsToPlaylistDialog(
-            allSongs = allSongs,
-            existing = songs.map { it.id }.toSet(),
-            onDismiss = { showAddDialog = false },
-            onConfirm = { toAddIds ->
-                if (toAddIds.isNotEmpty()) {
-                    addToPlaylist(context, playlist.id, toAddIds)
-                    onPlaylistChanged()
-                }
-                showAddDialog = false
-            }
-        )
-    }
-}
-*/
- */
 
 @Composable
 fun PlaylistSongsScreen(
@@ -1760,27 +1515,32 @@ fun loadAudioFiles(context: Context): List<AudioFile> {
         MediaStore.Audio.Media.TITLE,
         MediaStore.Audio.Media.ARTIST,
         MediaStore.Audio.Media.ALBUM_ID,
+        MediaStore.Audio.Media.DURATION,   // ⬅️ add
         MediaStore.Audio.Media.IS_MUSIC
     )
     val sel = "${MediaStore.Audio.Media.IS_MUSIC}!=0"
     val sort = "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC"
+
     context.contentResolver.query(base, proj, sel, null, sort)?.use { c ->
-        val idIx = c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
-        val titleIx = c.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
-        val artistIx = c.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+        val idIx      = c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+        val titleIx   = c.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+        val artistIx  = c.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
         val albumIdIx = c.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+        val durIx     = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
         while (c.moveToNext()) {
-            val id = c.getLong(idIx)
-            val title = c.getString(titleIx) ?: "(Untitled)"
-            val artist = c.getString(artistIx)
-            val albumId = c.getLong(albumIdIx)
+            val id       = c.getLong(idIx)
+            val title    = c.getString(titleIx) ?: "(Untitled)"
+            val artist   = c.getString(artistIx)
+            val albumId  = c.getLong(albumIdIx)
+            val duration = c.getLong(durIx).coerceAtLeast(0L)
             list.add(
                 AudioFile(
                     id = id,
                     title = title,
                     artist = artist,
                     uri = ContentUris.withAppendedId(base, id),
-                    albumId = albumId
+                    albumId = albumId,
+                    durationMs = duration
                 )
             )
         }
@@ -2286,29 +2046,40 @@ fun loadAlbums(context: Context): List<AlbumItem> {
 
 fun loadPlaylistSongs(context: Context, playlistId: Long): List<AudioFile> {
     val out = mutableListOf<AudioFile>()
-    val membersUri = MediaStore.Audio.Playlists.Members.getContentUri("external", playlistId)
+    val members = MediaStore.Audio.Playlists.Members.getContentUri("external", playlistId)
     val proj = arrayOf(
-        MediaStore.Audio.Playlists.Members.AUDIO_ID,   // song id
+        MediaStore.Audio.Playlists.Members.AUDIO_ID,    // actual track _id in Media table
         MediaStore.Audio.Playlists.Members.TITLE,
         MediaStore.Audio.Playlists.Members.ARTIST,
-        MediaStore.Audio.Playlists.Members.ALBUM_ID
+        MediaStore.Audio.Playlists.Members.ALBUM_ID,
+        MediaStore.Audio.Playlists.Members.DURATION      // ⬅️ duration available here
     )
-    val sort = MediaStore.Audio.Playlists.Members.PLAY_ORDER + " ASC"
+    val sort = "${MediaStore.Audio.Playlists.Members.PLAY_ORDER} ASC"
 
-    context.contentResolver.query(membersUri, proj, null, null, sort)?.use { c ->
-        val idIx = c.getColumnIndexOrThrow(MediaStore.Audio.Playlists.Members.AUDIO_ID)
-        val titleIx = c.getColumnIndexOrThrow(MediaStore.Audio.Playlists.Members.TITLE)
-        val artistIx = c.getColumnIndexOrThrow(MediaStore.Audio.Playlists.Members.ARTIST)
+    context.contentResolver.query(members, proj, null, null, sort)?.use { c ->
+        val idIx      = c.getColumnIndexOrThrow(MediaStore.Audio.Playlists.Members.AUDIO_ID)
+        val titleIx   = c.getColumnIndexOrThrow(MediaStore.Audio.Playlists.Members.TITLE)
+        val artistIx  = c.getColumnIndexOrThrow(MediaStore.Audio.Playlists.Members.ARTIST)
         val albumIdIx = c.getColumnIndexOrThrow(MediaStore.Audio.Playlists.Members.ALBUM_ID)
-        val base = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-
+        val durIx     = c.getColumnIndexOrThrow(MediaStore.Audio.Playlists.Members.DURATION)
         while (c.moveToNext()) {
-            val id = c.getLong(idIx)
-            val title = c.getString(titleIx) ?: "(Untitled)"
-            val artist = c.getString(artistIx)
-            val albumId = c.getLong(albumIdIx)
-            val uri = ContentUris.withAppendedId(base, id)
-            out.add(AudioFile(id = id, title = title, artist = artist, uri = uri, albumId = albumId))
+            val id       = c.getLong(idIx)
+            val title    = c.getString(titleIx) ?: "(Untitled)"
+            val artist   = c.getString(artistIx)
+            val albumId  = c.getLong(albumIdIx)
+            val duration = c.getLong(durIx).coerceAtLeast(0L)
+
+            val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
+            out.add(
+                AudioFile(
+                    id = id,
+                    title = title,
+                    artist = artist,
+                    uri = uri,
+                    albumId = albumId,
+                    durationMs = duration
+                )
+            )
         }
     }
     return out
