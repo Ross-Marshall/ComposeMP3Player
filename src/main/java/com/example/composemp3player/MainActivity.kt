@@ -126,6 +126,8 @@ import androidx.media3.common.C
 
 import androidx.media3.session.MediaSession
 
+import androidx.compose.material.icons.filled.Edit
+
 
 // ---------------------- Activity ----------------------
 
@@ -1374,24 +1376,67 @@ fun PlaylistSongsScreen(
     onPlaylistChanged: () -> Unit = {},
     contentPadding: PaddingValues,
 ) {
-    Column(Modifier.fillMaxSize().padding(contentPadding)) {
+    val context = LocalContext.current
 
-        // 🔽 Big cover at the top
-        PlaylistHeader(playlist = playlist, songs = songs)
+    // Image picker for updating playlist cover
+    val pickCoverLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            // Persist read permission so we can load this image later
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+            // Save selection and refresh screen
+            savePlaylistCoverUri(context, playlist.id, uri.toString())
+            onPlaylistChanged()
+        }
+    }
 
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(contentPadding)
+    ) {
+        // Header + Edit button overlay
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.TopEnd
+        ) {
+            // Your existing header that shows either user cover or collage
+            PlaylistHeader(playlist = playlist, songs = songs)
+
+            // Small edit button in the top-right corner of the artwork area
+            FilledTonalIconButton(
+                onClick = { pickCoverLauncher.launch(arrayOf("image/*")) },
+                modifier = Modifier
+                    .padding(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = "Edit cover"
+                )
+            }
+        }
+
+        // Song list
         LazyColumn(Modifier.fillMaxSize()) {
             items(songs, key = { it.id }) { s ->
                 ListItem(
                     leadingContent = { AlbumArtThumb(albumId = s.albumId, size = 52.dp) },
                     headlineContent = { Text(s.title, maxLines = 1) },
                     supportingContent = { Text(s.artist ?: "Unknown Artist", maxLines = 1) },
-                    modifier = Modifier.fillMaxWidth().clickable { onPlaySong(s) }
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onPlaySong(s) }
                 )
                 Divider()
             }
         }
     }
 }
+
 
 @Composable private fun GenresTab(genres: List<GenreItem>) {
     LazyColumn(Modifier.fillMaxSize()) {
