@@ -109,16 +109,8 @@ import androidx.core.content.contentValuesOf
 
 import android.content.Intent
 
-import androidx.compose.material.icons.filled.*
 
 import androidx.media3.common.MediaMetadata
-
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.FileDownload
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.ArrowDownward
 
 import androidx.compose.runtime.remember
 
@@ -173,12 +165,7 @@ enum class LibraryTab(val title: String) {
 
 data class ImportedEntry(val title: String?, val durationSec: Int?, val location: String)
 
-
-
 private const val SAFE_MODE: Boolean = false
-
-
-
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1131,25 +1118,6 @@ fun getAlbumArtUri(albumId: Long?): Uri? {
     )
 }
 
-/*
-@Composable
-fun AlbumArtThumb(albumId: Long?, size: Dp, modifier: Modifier = Modifier) {
-    val uri = getAlbumArtUri(albumId)
-    if (uri != null) {
-        androidx.compose.foundation.Image(
-            painter = coil.compose.rememberAsyncImagePainter(uri),
-            contentDescription = null,
-            modifier = modifier.size(size)
-        )
-    } else {
-        Box(
-            modifier = modifier
-                .size(size)
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-        )
-    }
-}
-*/
 
 @Composable
 fun AlbumArtThumb(
@@ -1407,13 +1375,6 @@ fun PlaylistSongsScreen(
     contentPadding: PaddingValues,
 ) {
     Column(Modifier.fillMaxSize().padding(contentPadding)) {
-       /* Row(
-            modifier = Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, "Back") }
-            //Text(playlist.name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 4.dp))
-        }*/
 
         // 🔽 Big cover at the top
         PlaylistHeader(playlist = playlist, songs = songs)
@@ -1432,72 +1393,6 @@ fun PlaylistSongsScreen(
     }
 }
 
-/*
-@Composable
-fun PlaylistSongsScreen(
-    playlist: PlaylistItem,
-    songs: List<AudioFile>,
-    // Kept for API compatibility with your existing calls (top app bar handles back)
-    onBack: () -> Unit = {},
-    onPlaySong: (AudioFile) -> Unit,
-    // Optional: if you later wire editing (add/remove/reorder) you can trigger a reload
-    onPlaylistChanged: () -> Unit = {},
-    contentPadding: PaddingValues = PaddingValues(0.dp)
-) {
-    val context = LocalContext.current
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = contentPadding
-    ) {
-        // Header
-        item {
-            Spacer(Modifier.height(8.dp))
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Text(playlist.name, style = MaterialTheme.typography.titleLarge)
-                PlaylistSummaryRow(playlist, songs) // shows "XX songs — h:mm:ss"
-            }
-            Divider()
-        }
-
-        // Songs in the playlist
-        items(songs, key = { it.id }) { song ->
-            ListItem(
-                leadingContent = {
-                    // Small album art on the left (uses your helper)
-                    AlbumArtThumb(albumId = song.albumId, size = 52.dp)
-                },
-                headlineContent = { Text(song.title, maxLines = 1) },
-                supportingContent = { Text(song.artist ?: "Unknown Artist", maxLines = 1) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onPlaySong(song) }
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            )
-            Divider()
-        }
-
-        item { Spacer(Modifier.height(16.dp)) }
-    }
-}
-*/
-
-/*
-@Composable
-private fun PlaylistSummaryRow(playlist: PlaylistItem, songs: List<AudioFile>) {
-    val durationStr = formatHms(totalDurationMs(songs))
-    Text(
-        text = "${songs.size} songs — $durationStr",
-        style = MaterialTheme.typography.bodyMedium,
-        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
-    )
-}
-*/
-
 @Composable private fun GenresTab(genres: List<GenreItem>) {
     LazyColumn(Modifier.fillMaxSize()) {
         items(genres, key = { it.id }) { genre ->
@@ -1506,88 +1401,6 @@ private fun PlaylistSummaryRow(playlist: PlaylistItem, songs: List<AudioFile>) {
         }
     }
 }
-
-/*
-@Composable
-private fun AddSongsToPlaylistDialog(
-    allSongs: List<AudioFile>,
-    existing: Set<Long>,
-    onDismiss: () -> Unit,
-    onConfirm: (List<Long>) -> Unit
-) {
-    var query by rememberSaveable { mutableStateOf("") }
-    val focus = LocalFocusManager.current
-    val selectable = remember(allSongs, existing) {
-        allSongs.filter { it.id !in existing }
-    }
-    val filtered by remember(query, selectable) {
-        derivedStateOf {
-            val q = query.trim().lowercase()
-            if (q.isEmpty()) selectable
-            else selectable.filter {
-                it.title.lowercase().contains(q) ||
-                        (it.artist ?: "").lowercase().contains(q)
-            }
-        }
-    }
-    val chosen = remember { mutableStateListOf<Long>() }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add songs to playlist") },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    label = { Text("Search songs") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                    trailingIcon = {
-                        if (query.isNotEmpty()) {
-                            IconButton(onClick = { query = "" }) {
-                                Icon(Icons.Default.Close, contentDescription = "Clear")
-                            }
-                        }
-                    },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { focus.clearFocus() })
-                )
-                Spacer(Modifier.height(8.dp))
-                LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
-                    items(filtered, key = { it.id }) { s ->
-                        val checked = s.id in chosen
-                        ListItem(
-                            leadingContent = {
-                                Checkbox(checked = checked, onCheckedChange = { on ->
-                                    if (on) chosen.add(s.id) else chosen.remove(s.id)
-                                })
-                            },
-                            headlineContent = { Text(s.title, maxLines = 1) },
-                            supportingContent = { Text(s.artist ?: "Unknown Artist", maxLines = 1) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    if (checked) chosen.remove(s.id) else chosen.add(s.id)
-                                }
-                        )
-                        Divider()
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { onConfirm(chosen.toList()) }) {
-                Text("Add (${chosen.size})")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
-    )
-}
-*/
 
 /* ---------- MediaStore loaders (for later) ---------- */
 
