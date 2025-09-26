@@ -123,6 +123,7 @@ import androidx.compose.runtime.DisposableEffect
 
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.Player
 
 import androidx.media3.session.MediaSession
 
@@ -190,6 +191,8 @@ fun MusicPlayerApp() {
     // The queue the player is currently using (songs / album / playlist / genre)
     var activeQueue by remember { mutableStateOf<List<AudioFile>>(emptyList()) }
 
+    var upNext by remember { mutableStateOf<List<AudioFile>>(emptyList()) }
+
     // --- Player + MediaSession ---
     val player = remember {
         ExoPlayer.Builder(context).build().apply {
@@ -203,6 +206,8 @@ fun MusicPlayerApp() {
         }
     }
     val mediaSession = remember { MediaSession.Builder(context, player).build() }
+
+    fun recomputeUpNext() { upNext = snapshotUpNext(player, activeQueue) }
 
     // Release both on dispose
     DisposableEffect(player, mediaSession) {
@@ -243,6 +248,12 @@ fun MusicPlayerApp() {
                 positionMs = p.currentPosition
                 shuffleOn = p.shuffleModeEnabled
                 repeatMode = p.repeatMode
+
+                if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) ||
+                    events.contains(Player.EVENT_TIMELINE_CHANGED) ||
+                    events.contains(Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)) {
+                    recomputeUpNext()
+                }
             }
         }
         player.addListener(listener)
@@ -281,10 +292,13 @@ fun MusicPlayerApp() {
             player.setMediaItems(songs.map(::songToMediaItem))
             player.prepare()
             activeQueue = songs                  // ✅ keep UI in sync
+            recomputeUpNext()
         }
     }
 
-    val onToggleShuffle = { player.shuffleModeEnabled = !player.shuffleModeEnabled }
+    val onToggleShuffle = { player.shuffleModeEnabled = !player.shuffleModeEnabled
+        recomputeUpNext()
+    }
     val onCycleRepeat = {
         player.repeatMode = when (player.repeatMode) {
             androidx.media3.common.Player.REPEAT_MODE_OFF -> androidx.media3.common.Player.REPEAT_MODE_ALL
@@ -300,6 +314,7 @@ fun MusicPlayerApp() {
             player.setMediaItems(songs.map(::songToMediaItem))
             player.prepare()
             activeQueue = songs                  // ✅ initial queue
+            recomputeUpNext()
         } else if (!requestedOnce) {
             requestedOnce = true
             permissionLauncher.launch(neededPermission)
@@ -378,9 +393,11 @@ fun MusicPlayerApp() {
                         val idx = albumSongs.indexOfFirst { it.id == song.id }
                         if (idx >= 0) {
                             activeQueue = albumSongs
+
                             player.setMediaItems(albumSongs.map(::songToMediaItem), idx, 0)
                             player.prepare()
                             player.play()
+                            recomputeUpNext()
                         }
                     },
                     contentPadding = inner
@@ -404,6 +421,7 @@ fun MusicPlayerApp() {
                         val idx = playlistSongs.indexOfFirst { it.id == song.id }
                         if (idx >= 0) {
                             activeQueue = playlistSongs                           // ✅
+                            recomputeUpNext()
                             player.setMediaItems(playlistSongs.map(::songToMediaItem), idx, 0)
                             player.prepare()
                             player.play()
@@ -428,10 +446,12 @@ fun MusicPlayerApp() {
                     onPlaySong = { song ->
                         val idx = genreSongs.indexOfFirst { it.id == song.id }
                         if (idx >= 0) {
-                            activeQueue = genreSongs                               // ✅
+                            activeQueue = genreSongs
+
                             player.setMediaItems(genreSongs.map(::songToMediaItem), idx, 0)
                             player.prepare()
                             player.play()
+                            recomputeUpNext()       // ✅
                         }
                     },
                     contentPadding = inner
@@ -463,9 +483,11 @@ fun MusicPlayerApp() {
                                     val idx = songs.indexOfFirst { it.id == song.id }
                                     if (idx >= 0) {
                                         activeQueue = songs                        // ✅
+
                                         player.setMediaItems(songs.map(::songToMediaItem), idx, 0)
                                         player.prepare()
                                         player.play()
+                                        recomputeUpNext()
                                     }
                                 }
                             )
@@ -509,7 +531,8 @@ fun MusicPlayerApp() {
                         player.seekTo(index, 0)
                         player.play()
                     }
-                }
+                },
+                upNext = upNext
             )
         }
     }
@@ -1554,6 +1577,7 @@ private fun NowPlayingBar(
     }
 }
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun NowPlayingSheet(
@@ -1572,11 +1596,11 @@ private fun NowPlayingSheet(
     repeatMode: Int,
     onToggleShuffle: () -> Unit,
     onCycleRepeat: () -> Unit,
-    onJumpTo: (Int) -> Unit
+    onJumpTo: (Int) -> Unit,
+    upNext: List<AudioFile>        // driven by the player's real order
 ) {
     if (current == null) return
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
     val queueState = rememberLazyListState()
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
@@ -1673,7 +1697,7 @@ private fun NowPlayingSheet(
                 }
             }
 
-            // --- Shuffle / Repeat row (slimmed down) ---
+            // --- Shuffle / Repeat row ---
             Spacer(Modifier.height(6.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1697,7 +1721,7 @@ private fun NowPlayingSheet(
                 )
             }
 
-            // --- Queue (compact) ---
+            // --- Up Next (based on the player's real order) ---
             Spacer(Modifier.height(8.dp))
             Text(
                 "Up Next",
@@ -1706,34 +1730,38 @@ private fun NowPlayingSheet(
             )
             Spacer(Modifier.height(4.dp))
 
+            val ordered = remember(upNext) { upNext.drop(1) } // could use upNext.drop(1) if you don't want the current item shown
             LazyColumnWithScrollbar(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 160.dp),
+                    .heightIn(max = 52.dp),
                 state = queueState
             ) {
-                items(queue.size) { idx ->
-                    val item = queue[idx]
+                items(ordered.size) { i ->
+                    val item = ordered[i]
+                    // Resolve this item back to its index in the current queue (for accurate seeks)
+                    val targetIndex = queue.indexOfFirst { it.id == item.id }
+
                     ListItem(
                         leadingContent = { AlbumArtThumb(albumId = item.albumId, size = 52.dp) },
                         headlineContent = { Text(item.title, maxLines = 1, style = MaterialTheme.typography.bodySmall) },
                         supportingContent = { Text(item.artist ?: "Unknown Artist", maxLines = 1, style = MaterialTheme.typography.labelSmall) },
                         trailingContent = {
-                            if (idx == currentIndex) Text("• Now", style = MaterialTheme.typography.labelSmall)
+                            if (i == 0) Text("• Next", style = MaterialTheme.typography.labelSmall)
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onJumpTo(idx) }
+                            .clickable { if (targetIndex >= 0) onJumpTo(targetIndex) }
                     )
                     Divider(thickness = 0.5.dp)
                 }
             }
 
-
             Spacer(Modifier.height(12.dp))
         }
     }
 }
+
 
 fun songToMediaItem(song: AudioFile): MediaItem {
     val artUri = song.albumId?.let {
@@ -2091,6 +2119,30 @@ private fun getPlaylistTrackCount(context: Context, playlistId: Long): Int {
         null, null, null
     )?.use { c -> return c.count }
     return 0
+}
+
+private fun snapshotUpNext(
+    player: Player,
+    library: List<AudioFile>
+): List<AudioFile> {
+    val count = player.mediaItemCount
+    if (count <= 0) return emptyList()
+
+    // Map by mediaId so we can resolve the timeline items back to your AudioFile
+    val byId = library.associateBy { it.id.toString() }
+
+    val order = mutableListOf<AudioFile>()
+    var idx = player.currentMediaItemIndex.takeIf { it != C.INDEX_UNSET } ?: 0
+    val seen = HashSet<Int>()
+
+    // Walk forward using the player's own notion of "next", which respects shuffle/repeat.
+    // Stop on loops or end-of-queue.
+    while (idx != C.INDEX_UNSET && seen.add(idx) && order.size < count) {
+        val mediaId = player.getMediaItemAt(idx).mediaId
+        byId[mediaId]?.let { order += it }
+        idx = player.getNextMediaItemIndex()
+    }
+    return order
 }
 
 
