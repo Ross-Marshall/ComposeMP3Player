@@ -15,6 +15,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 
+import android.app.PendingIntent
+import android.content.Intent
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     // 1. ALL STATE VARIABLES (Declared at the top to prevent "unresolved" errors)
@@ -37,7 +42,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     var playlists by mutableStateOf<List<Playlist>>(emptyList())
 
     // 2. THE PLAYER & SESSION
-    val player: Player = ExoPlayer.Builder(application).build()
+    //val player: Player = ExoPlayer.Builder(application).build()
+    // Inside MusicViewModel
+    private val player = ExoPlayer.Builder(getApplication()).apply {
+        setAudioAttributes(
+            AudioAttributes.Builder()
+                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                .setUsage(C.USAGE_MEDIA)
+                .build(),
+            true // Handles Audio Focus automatically
+        )
+        setHandleAudioBecomingNoisy(true) // Stops playback on Bluetooth disconnect
+    }.build()
+
     private var mediaSession: MediaSession? = null
 
     // 3. DERIVED STATES (These rely on the variables above)
@@ -84,8 +101,27 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
 
     init {
+        // 1. Create the Intent that opens the app when you tap the notification
+        val intent = Intent(getApplication(), MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            getApplication(),
+            0,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // 2. Build the Session
+        /*val mediaSession = MediaSession.Builder(getApplication(), player)
+            .setSessionActivity(pendingIntent)
+            .build() */
+
         player.repeatMode = Player.REPEAT_MODE_ALL
-        mediaSession = MediaSession.Builder(application, player).build()
+        //mediaSession = MediaSession.Builder(application, player).build()
+
+        // CRITICAL: This tells Android "I am a foreground music app, don't kill me!"
+        /*setMediaNotificationProvider(DefaultMediaNotificationProvider.Builder(this)
+            .setChannelId("music_channel")
+            .build())*/
 
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
@@ -227,13 +263,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 val name = cursor.getString(nameCol)
                 val path = cursor.getString(dataCol) ?: ""
 
-                // 🐧 THE SD CARD FILTER: Only process files that are NOT on the internal storage
-                // or specifically on your SD card path (/storage/3930-6433/)
-                /*if (path.startsWith("/storage/emulated/0/")) {
-                    continue // Skip the internal storage "mirror" or "ghost" records
-                }*/
-
-                //val file = File(cursor.getString(dataCol) ?: "")
                 val file = java.io.File(path)
 
                 // Only admit the playlist if the .m3u file actually exists on the disk
