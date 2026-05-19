@@ -55,7 +55,23 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         setHandleAudioBecomingNoisy(true) // Stops playback on Bluetooth disconnect
     }.build()
 
-    private var mediaSession: MediaSession? = null
+    // 2. Define the callback here at the class level (private is allowed here!)
+    private val mediaSessionCallback = object : MediaSession.Callback {
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo
+        ): MediaSession.ConnectionResult {
+            // This automatically returns an accepted ConnectionResult with all default commands enabled
+            return super.onConnect(session, controller)
+        }
+    }
+
+    // 3. Define the mediaSession here at the class level
+    private val mediaSession = MediaSession.Builder(getApplication(), player)
+        .setCallback(mediaSessionCallback)
+        .build()
+
+    //private var mediaSession: MediaSession? = null
 
     // 3. DERIVED STATES (These rely on the variables above)
     val filteredSongs by derivedStateOf {
@@ -110,18 +126,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             PendingIntent.FLAG_IMMUTABLE
         )
 
-        // 2. Build the Session
-        /*val mediaSession = MediaSession.Builder(getApplication(), player)
-            .setSessionActivity(pendingIntent)
-            .build() */
+
 
         player.repeatMode = Player.REPEAT_MODE_ALL
-        //mediaSession = MediaSession.Builder(application, player).build()
-
-        // CRITICAL: This tells Android "I am a foreground music app, don't kill me!"
-        /*setMediaNotificationProvider(DefaultMediaNotificationProvider.Builder(this)
-            .setChannelId("music_channel")
-            .build())*/
 
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
